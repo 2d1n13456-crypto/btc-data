@@ -1,0 +1,86 @@
+{
+  "binance_btc_usdt": {
+    "h1": {
+      "buy_sell_ratio": 1.540913004738855,
+      "close_time_ms": 1790139599999,
+      "delta_quote_usdt": 16247602.723883703,
+      "open_time_ms": 1790136000000,
+      "quote_volume_usdt": 76322337.7793953,
+      "taker_buy_quote_usdt": 46284970.2516395,
+      "taker_buy_share_pct": 60.64406777662283,
+      "taker_sell_quote_usdt": 30037367.527755797,
+      "taker_sell_share_pct": 39.35593222337716,
+      "trade_count": 138611
+    },
+    "h4": {
+      "buy_sell_ratio": 1.4969442378852462,
+      "close_time_ms": 1790135999999,
+      "delta_quote_usdt": 42155963.84513241,
+      "open_time_ms": 1790121600000,
+      "quote_volume_usdt": 211816704.9557558,
+      "taker_buy_quote_usdt": 126986334.4004441,
+      "taker_buy_share_pct": 59.951047971862735,
+      "taker_sell_quote_usdt": 84830370.5553117,
+      "taker_sell_share_pct": 40.04895202813727,
+      "trade_count": 421911
+    },
+    "m15": {
+      "buy_sell_ratio": 0.5951190069193287,
+      "close_time_ms": 1790142299999,
+      "delta_quote_usdt": -3068782.6558058,
+      "open_time_ms": 1790141400000,
+      "quote_volume_usdt": 12090153.9613762,
+      "taker_buy_quote_usdt": 4510685.6527852,
+      "taker_buy_share_pct": 37.30875278507832,
+      "taker_sell_quote_usdt": 7579468.308591,
+      "taker_sell_share_pct": 62.69124721492168,
+      "trade_count": 26884
+    },
+    "source": "Binance Spot public klines",
+    "status": "ok"
+  },
+  "coinbase_btc_usd": {
+    "coverage_15m_complete": true,
+    "coverage_1h_complete": true,
+    "h1": {
+      "aggressive_buy_usd": 10571284.910884243,
+      "aggressive_sell_usd": 11860786.634954063,
+      "buy_sell_ratio": 0.891280252840092,
+      "spot_cvd_usd": -1289501.7240698207,
+      "taker_buy_share_pct": 47.12576317030102,
+      "trade_count": 19746
+    },
+    "m15": {
+      "aggressive_buy_usd": 2719710.597924229,
+      "aggressive_sell_usd": 3485348.25087075,
+      "buy_sell_ratio": 0.7803267857795156,
+      "spot_cvd_usd": -765637.6529465206,
+      "taker_buy_share_pct": 43.83053673137035,
+      "trade_count": 4788
+    },
+    "oldest_trade_time": "2026-09-23T04:56:41.466117Z",
+    "pages_fetched": 20,
+    "side_definition": "API side is maker side; aggressor side inverted",
+    "source": "Coinbase Exchange public trades",
+    "status": "ok"
+  },
+  "fetched_at": "2026-09-23T05:57:35.983435Z",
+  "kraken_btc_usd_orderbook": {
+    "ask_notional_usd": 1472052.093536853,
+    "ask_share_pct": 91.28475603274724,
+    "bid_notional_usd": 140541.462619197,
+    "bid_share_pct": 8.715243967252766,
+    "imbalance_pct": -82.56951206549445,
+    "levels_ask": 10,
+    "levels_bid": 10,
+    "note": "Standing liquidity only; not proof of executed buying pressure",
+    "source": "Kraken PreTrade public order book",
+    "status": "ok"
+  },
+  "purpose": "BTC spot demand",
+  "quality": {
+    "coinbase_1h_complete": true,
+    "executed_flow_available": true,
+    "primary_signal": "coinbase_btc_usd"
+  }
+}
