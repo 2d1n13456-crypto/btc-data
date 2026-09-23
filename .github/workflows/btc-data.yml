@@ -18,51 +18,74 @@ jobs:
       - name: Download Kraken BTC OHLCV
         run: |
           mkdir -p data
-          curl -fsSL "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=60" -o data/btc-1h.json
-          curl -fsSL "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=240" -o data/btc-4h.json
-          curl -fsSL "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440" -o data/btc-1d.json
+
+          curl -fsSL \
+            "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=60" \
+            -o data/btc-1h.json
+
+          curl -fsSL \
+            "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=240" \
+            -o data/btc-4h.json
+
+          curl -fsSL \
+            "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440" \
+            -o data/btc-1d.json
+
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/updated.txt
+
 
       - name: Download Bitcoin Lab on-chain data
         continue-on-error: true
         env:
           BITLAB_API_TOKEN: ${{ secrets.BITCOINLAB_API_TOKEN }}
+
         run: |
-          # On-chain nur alle 4 Stunden abrufen.
-          # Das schont das kostenlose Tier-0-Kontingent.
+          set -u
+
+          # Automatisch nur alle 4 Stunden.
+          # Bei manuellem "Run workflow" immer ausführen.
           HOUR=$(date -u +%H)
 
-          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] && [ $((10#$HOUR % 4)) -ne 0 ]; then
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] &&
+             [ $((10#$HOUR % 4)) -ne 0 ]; then
             echo "No on-chain refresh this hour"
             exit 0
           fi
 
-          if [ -z "$BITLAB_API_TOKEN" ]; then
-            echo "BITCOINLAB_API_TOKEN missing"
+          if [ -z "${BITLAB_API_TOKEN:-}" ]; then
+            echo "ERROR: BITCOINLAB_API_TOKEN missing"
             exit 1
           fi
 
           mkdir -p data
 
-          BASE="https://api.thebitcoinresearcher.net"
+          BASE="https://api.researchbitcoin.net"
           FROM_TIME=$(date -u -d "8 days ago" +"%Y-%m-%dT%H:%M:%SZ")
           TO_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+          SUCCESS=0
+          FAILED=0
+
           fetch_metric () {
-            ENDPOINT="$1"
+            GROUP="$1"
             FIELD="$2"
             FILE="$3"
             TMP="${FILE}.tmp"
 
-            # Alte Datei entfernen, damit bei einem Fehler
-            # niemals unbemerkt ein veralteter Wert weiterbenutzt wird.
-            rm -f "$FILE" "$TMP"
+            rm -f "$TMP"
 
-            if curl --fail --silent --show-error \
-              --retry 2 --retry-delay 2 \
+            echo "Fetching $GROUP/$FIELD ..."
+
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --max-time 40 \
+              --retry 1 \
+              --retry-delay 5 \
               -H "X-API-Token: $BITLAB_API_TOKEN" \
               -H "Accept: application/json" \
-              --get "$BASE/v2/$ENDPOINT/$FIELD" \
+              --get "$BASE/v2/$GROUP/$FIELD" \
               --data-urlencode "from_time=$FROM_TIME" \
               --data-urlencode "to_time=$TO_TIME" \
               --data-urlencode "resolution=h4" \
@@ -71,54 +94,101 @@ jobs:
               jq -e . "$TMP" >/dev/null
             then
               mv "$TMP" "$FILE"
+              SUCCESS=$((SUCCESS + 1))
               echo "OK: $FIELD"
             else
               rm -f "$TMP"
+              FAILED=$((FAILED + 1))
               echo "FAILED: $FIELD"
             fi
           }
 
-          fetch_metric "realizedprice" \
+
+          # 1. Kostenbasis kurzfristiger Anleger
+          fetch_metric \
+            "realizedprice" \
             "realized_price_sth" \
             "data/onchain-realized-price-sth.json"
 
-          fetch_metric "spent_output_profit_ratio" \
+          # 2. Kostenbasis langfristiger Anleger
+          fetch_metric \
+            "realizedprice" \
+            "realized_price_lth" \
+            "data/onchain-realized-price-lth.json"
+
+          # 3. STH-Bewertung / Überhitzung / Kapitulation
+          fetch_metric \
+            "market_value_to_realized_value" \
+            "mvrv_z_52k_window_sth" \
+            "data/onchain-mvrv-z-sth.json"
+
+          # 4. Gewinn-/Verlustrealisierung kurzfristiger Anleger
+          fetch_metric \
+            "spent_output_profit_ratio" \
             "sopr_sth" \
             "data/onchain-sopr-sth.json"
 
-          fetch_metric "market_value_to_realized_value" \
-            "mvrv_z_sth" \
-            "data/onchain-mvrv-z-sth.json"
-
-          fetch_metric "net_realized_profit_loss" \
+          # 5. Tatsächlich realisierter Gewinn/Verlust der STH
+          fetch_metric \
+            "net_realized_profit_loss" \
             "net_realized_profit_loss_sth" \
             "data/onchain-nrpl-sth.json"
 
-          fetch_metric "cointime_statistics" \
+          # 6. Kapitalzufluss / Kapitalabfluss
+          fetch_metric \
+            "realizedcap" \
+            "realized_cap" \
+            "data/onchain-realized-cap.json"
+
+          # 7. Bewegung älterer Coins / Distribution
+          fetch_metric \
+            "cointime_statistics" \
             "liveliness" \
             "data/onchain-liveliness.json"
 
-          fetch_metric "cointime_statistics" \
+          # 8. Ökonomische Kostenbasis aktiver Marktteilnehmer
+          fetch_metric \
+            "cointime_statistics" \
             "true_market_meanprice" \
             "data/onchain-true-market-mean.json"
 
-          fetch_metric "market_value_to_realized_value" \
+          # 9. Übergeordnete Marktzyklus-Bewertung
+          fetch_metric \
+            "market_value_to_realized_value" \
             "mvrv_z" \
             "data/onchain-mvrv-z.json"
 
-          fetch_metric "cointime_statistics" \
-            "active_value_to_investor_value" \
-            "data/onchain-aviv.json"
 
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/onchain-updated.txt
+          echo "Successful metrics: $SUCCESS"
+          echo "Failed metrics: $FAILED"
+
+          # Nur als frisch markieren, wenn alle neun Abfragen
+          # tatsächlich erfolgreich waren.
+          if [ "$SUCCESS" -eq 9 ]; then
+            date -u +"%Y-%m-%dT%H:%M:%SZ" \
+              > data/onchain-updated.txt
+            echo "On-chain dataset complete"
+          else
+            echo "On-chain dataset incomplete - freshness timestamp unchanged"
+          fi
+
 
       - name: Save data
         if: always()
         run: |
           rm -f data/*.tmp
+
           git config user.name "btc-data-bot"
           git config user.email "btc-data-bot@users.noreply.github.com"
+
           git add data/
-          git diff --cached --quiet || git commit -m "Update BTC and on-chain data"
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+
+          git commit -m "Update BTC and on-chain data"
+
           git pull --rebase
           git push
