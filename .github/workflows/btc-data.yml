@@ -23,10 +23,102 @@ jobs:
           curl -fsSL "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440" -o data/btc-1d.json
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/updated.txt
 
-      - name: Save data
+      - name: Download Bitcoin Lab on-chain data
+        continue-on-error: true
+        env:
+          BITLAB_API_TOKEN: ${{ secrets.BITCOINLAB_API_TOKEN }}
         run: |
+          # On-chain nur alle 4 Stunden abrufen.
+          # Das schont das kostenlose Tier-0-Kontingent.
+          HOUR=$(date -u +%H)
+
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] && [ $((10#$HOUR % 4)) -ne 0 ]; then
+            echo "No on-chain refresh this hour"
+            exit 0
+          fi
+
+          if [ -z "$BITLAB_API_TOKEN" ]; then
+            echo "BITCOINLAB_API_TOKEN missing"
+            exit 1
+          fi
+
+          mkdir -p data
+
+          BASE="https://api.thebitcoinresearcher.net"
+          FROM_TIME=$(date -u -d "8 days ago" +"%Y-%m-%dT%H:%M:%SZ")
+          TO_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          fetch_metric () {
+            ENDPOINT="$1"
+            FIELD="$2"
+            FILE="$3"
+            TMP="${FILE}.tmp"
+
+            # Alte Datei entfernen, damit bei einem Fehler
+            # niemals unbemerkt ein veralteter Wert weiterbenutzt wird.
+            rm -f "$FILE" "$TMP"
+
+            if curl --fail --silent --show-error \
+              --retry 2 --retry-delay 2 \
+              -H "X-API-Token: $BITLAB_API_TOKEN" \
+              -H "Accept: application/json" \
+              --get "$BASE/v2/$ENDPOINT/$FIELD" \
+              --data-urlencode "from_time=$FROM_TIME" \
+              --data-urlencode "to_time=$TO_TIME" \
+              --data-urlencode "resolution=h4" \
+              --data-urlencode "output_format=json" \
+              -o "$TMP" &&
+              jq -e . "$TMP" >/dev/null
+            then
+              mv "$TMP" "$FILE"
+              echo "OK: $FIELD"
+            else
+              rm -f "$TMP"
+              echo "FAILED: $FIELD"
+            fi
+          }
+
+          fetch_metric "realizedprice" \
+            "realized_price_sth" \
+            "data/onchain-realized-price-sth.json"
+
+          fetch_metric "spent_output_profit_ratio" \
+            "sopr_sth" \
+            "data/onchain-sopr-sth.json"
+
+          fetch_metric "market_value_to_realized_value" \
+            "mvrv_z_sth" \
+            "data/onchain-mvrv-z-sth.json"
+
+          fetch_metric "net_realized_profit_loss" \
+            "net_realized_profit_loss_sth" \
+            "data/onchain-nrpl-sth.json"
+
+          fetch_metric "cointime_statistics" \
+            "liveliness" \
+            "data/onchain-liveliness.json"
+
+          fetch_metric "cointime_statistics" \
+            "true_market_meanprice" \
+            "data/onchain-true-market-mean.json"
+
+          fetch_metric "market_value_to_realized_value" \
+            "mvrv_z" \
+            "data/onchain-mvrv-z.json"
+
+          fetch_metric "cointime_statistics" \
+            "active_value_to_investor_value" \
+            "data/onchain-aviv.json"
+
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/onchain-updated.txt
+
+      - name: Save data
+        if: always()
+        run: |
+          rm -f data/*.tmp
           git config user.name "btc-data-bot"
           git config user.email "btc-data-bot@users.noreply.github.com"
           git add data/
-          git diff --cached --quiet || git commit -m "Update BTC OHLCV"
+          git diff --cached --quiet || git commit -m "Update BTC and on-chain data"
+          git pull --rebase
           git push
