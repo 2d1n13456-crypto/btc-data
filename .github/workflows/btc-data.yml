@@ -512,4 +512,251 @@ jobs:
               "primary_signal":
                   (
                       "coinbase_btc_usd"
-                      if coinbase
+                      if coinbase_ok
+                      and result[
+                          "coinbase_btc_usd"
+                      ].get(
+                          "coverage_1h_complete",
+                          False
+                      )
+                      else
+                      "binance_btc_usdt"
+                      if binance_ok
+                      else
+                      "unavailable"
+                  ),
+          }
+
+
+          # ========================================================
+          # SAVE
+          # ========================================================
+
+          with open(
+              "data/spot-demand.json",
+              "w",
+              encoding="utf-8",
+          ) as fh:
+
+              json.dump(
+                  result,
+                  fh,
+                  indent=2,
+                  sort_keys=True,
+              )
+
+
+          # Freshness timestamp only when actual
+          # executed-flow data exists.
+          if coinbase_ok or binance_ok:
+
+              with open(
+                  "data/spot-demand-updated.txt",
+                  "w",
+                  encoding="utf-8",
+              ) as fh:
+
+                  fh.write(
+                      result["fetched_at"]
+                      + "\n"
+                  )
+
+
+          print(
+              json.dumps(
+                  result,
+                  indent=2
+              )
+          )
+
+          PY
+
+
+      # ------------------------------------------------------------
+      # BITCOIN LAB ON-CHAIN
+      # ------------------------------------------------------------
+      - name: Download Bitcoin Lab on-chain data
+        continue-on-error: true
+        env:
+          BITLAB_API_TOKEN: ${{ secrets.BITCOINLAB_API_TOKEN }}
+
+        run: |
+          set -u
+
+          HOUR=$(date -u +%H)
+
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] &&
+             [ $((10#$HOUR % 4)) -ne 0 ]; then
+
+            echo "No on-chain refresh this hour"
+            exit 0
+
+          fi
+
+          if [ -z "${BITLAB_API_TOKEN:-}" ]; then
+
+            echo "ERROR: BITCOINLAB_API_TOKEN missing"
+            exit 1
+
+          fi
+
+          mkdir -p data
+
+          BASE="https://api.researchbitcoin.net"
+
+          FROM_TIME=$(
+            date -u -d "8 days ago" \
+            +"%Y-%m-%dT%H:%M:%SZ"
+          )
+
+          TO_TIME=$(
+            date -u \
+            +"%Y-%m-%dT%H:%M:%SZ"
+          )
+
+          SUCCESS=0
+          FAILED=0
+
+
+          fetch_metric () {
+
+            GROUP="$1"
+            FIELD="$2"
+            FILE="$3"
+            TMP="${FILE}.tmp"
+
+            rm -f "$TMP"
+
+            echo "Fetching $GROUP/$FIELD ..."
+
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --max-time 40 \
+              --retry 1 \
+              --retry-delay 5 \
+              -H "X-API-Token: $BITLAB_API_TOKEN" \
+              -H "Accept: application/json" \
+              --get "$BASE/v2/$GROUP/$FIELD" \
+              --data-urlencode "from_time=$FROM_TIME" \
+              --data-urlencode "to_time=$TO_TIME" \
+              --data-urlencode "resolution=h4" \
+              --data-urlencode "output_format=json" \
+              -o "$TMP" &&
+              jq -e . "$TMP" >/dev/null
+
+            then
+
+              mv "$TMP" "$FILE"
+
+              SUCCESS=$((SUCCESS + 1))
+
+              echo "OK: $FIELD"
+
+            else
+
+              rm -f "$TMP"
+
+              FAILED=$((FAILED + 1))
+
+              echo "FAILED: $FIELD"
+
+            fi
+          }
+
+
+          fetch_metric \
+            "realizedprice" \
+            "realized_price_sth" \
+            "data/onchain-realized-price-sth.json"
+
+          fetch_metric \
+            "realizedprice" \
+            "realized_price_lth" \
+            "data/onchain-realized-price-lth.json"
+
+          fetch_metric \
+            "market_value_to_realized_value" \
+            "mvrv_z_52k_window_sth" \
+            "data/onchain-mvrv-z-sth.json"
+
+          fetch_metric \
+            "spent_output_profit_ratio" \
+            "sopr_sth" \
+            "data/onchain-sopr-sth.json"
+
+          fetch_metric \
+            "net_realized_profit_loss" \
+            "net_realized_profit_loss_sth" \
+            "data/onchain-nrpl-sth.json"
+
+          fetch_metric \
+            "realizedcap" \
+            "realized_cap" \
+            "data/onchain-realized-cap.json"
+
+          fetch_metric \
+            "cointime_statistics" \
+            "liveliness" \
+            "data/onchain-liveliness.json"
+
+          fetch_metric \
+            "cointime_statistics" \
+            "true_market_meanprice" \
+            "data/onchain-true-market-mean.json"
+
+          fetch_metric \
+            "market_value_to_realized_value" \
+            "mvrv_z" \
+            "data/onchain-mvrv-z.json"
+
+
+          echo "Successful metrics: $SUCCESS"
+          echo "Failed metrics: $FAILED"
+
+
+          if [ "$SUCCESS" -eq 9 ]; then
+
+            date -u \
+              +"%Y-%m-%dT%H:%M:%SZ" \
+              > data/onchain-updated.txt
+
+            echo "On-chain dataset complete"
+
+          else
+
+            echo \
+              "On-chain dataset incomplete - freshness timestamp unchanged"
+
+          fi
+
+
+      # ------------------------------------------------------------
+      # SAVE
+      # ------------------------------------------------------------
+      - name: Save data
+        if: always()
+        run: |
+          rm -f data/*.tmp
+
+          git config \
+            user.name \
+            "btc-data-bot"
+
+          git config \
+            user.email \
+            "btc-data-bot@users.noreply.github.com"
+
+          git add data/
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+
+          git commit \
+            -m "Update BTC, spot demand and on-chain data"
+
+          git pull --rebase
+          git push
