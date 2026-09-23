@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: btc-data-update
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -15,6 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ------------------------------------------------------------
+      # KRAKEN OHLCV
+      # ------------------------------------------------------------
       - name: Download Kraken BTC OHLCV
         run: |
           mkdir -p data
@@ -34,161 +41,475 @@ jobs:
           date -u +"%Y-%m-%dT%H:%M:%SZ" > data/updated.txt
 
 
-      - name: Download Bitcoin Lab on-chain data
+      # ------------------------------------------------------------
+      # SPOT DEMAND
+      # Coinbase BTC/USD + Binance BTC/USDT + Kraken Orderbook
+      # ------------------------------------------------------------
+      - name: Build spot demand metrics
         continue-on-error: true
-        env:
-          BITLAB_API_TOKEN: ${{ secrets.BITCOINLAB_API_TOKEN }}
-
         run: |
-          set -u
+          python3 - <<'PY'
+          import json
+          import time
+          import urllib.parse
+          import urllib.request
+          from datetime import datetime, timezone, timedelta
 
-          # Automatisch nur alle 4 Stunden.
-          # Bei manuellem "Run workflow" immer ausführen.
-          HOUR=$(date -u +%H)
+          NOW = datetime.now(timezone.utc)
+          NOW_MS = int(NOW.timestamp() * 1000)
 
-          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] &&
-             [ $((10#$HOUR % 4)) -ne 0 ]; then
-            echo "No on-chain refresh this hour"
-            exit 0
-          fi
+          def get_json(url, headers=None, timeout=30):
+              req = urllib.request.Request(
+                  url,
+                  headers=headers or {
+                      "Accept": "application/json",
+                      "User-Agent": "btc-data-github-action/1.0",
+                  },
+              )
 
-          if [ -z "${BITLAB_API_TOKEN:-}" ]; then
-            echo "ERROR: BITCOINLAB_API_TOKEN missing"
-            exit 1
-          fi
+              with urllib.request.urlopen(req, timeout=timeout) as resp:
+                  return (
+                      json.loads(resp.read().decode("utf-8")),
+                      dict(resp.headers),
+                  )
 
-          mkdir -p data
+          def ratio(a, b):
+              if not b:
+                  return None
+              return a / b
 
-          BASE="https://api.researchbitcoin.net"
-          FROM_TIME=$(date -u -d "8 days ago" +"%Y-%m-%dT%H:%M:%SZ")
-          TO_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          SUCCESS=0
-          FAILED=0
-
-          fetch_metric () {
-            GROUP="$1"
-            FIELD="$2"
-            FILE="$3"
-            TMP="${FILE}.tmp"
-
-            rm -f "$TMP"
-
-            echo "Fetching $GROUP/$FIELD ..."
-
-            if curl \
-              --fail \
-              --silent \
-              --show-error \
-              --max-time 40 \
-              --retry 1 \
-              --retry-delay 5 \
-              -H "X-API-Token: $BITLAB_API_TOKEN" \
-              -H "Accept: application/json" \
-              --get "$BASE/v2/$GROUP/$FIELD" \
-              --data-urlencode "from_time=$FROM_TIME" \
-              --data-urlencode "to_time=$TO_TIME" \
-              --data-urlencode "resolution=h4" \
-              --data-urlencode "output_format=json" \
-              -o "$TMP" &&
-              jq -e . "$TMP" >/dev/null
-            then
-              mv "$TMP" "$FILE"
-              SUCCESS=$((SUCCESS + 1))
-              echo "OK: $FIELD"
-            else
-              rm -f "$TMP"
-              FAILED=$((FAILED + 1))
-              echo "FAILED: $FIELD"
-            fi
+          result = {
+              "fetched_at": NOW.isoformat().replace("+00:00", "Z"),
+              "purpose": "BTC spot demand",
+              "coinbase_btc_usd": {
+                  "status": "unavailable"
+              },
+              "binance_btc_usdt": {
+                  "status": "unavailable"
+              },
+              "kraken_btc_usd_orderbook": {
+                  "status": "unavailable"
+              },
           }
 
 
-          # 1. Kostenbasis kurzfristiger Anleger
-          fetch_metric \
-            "realizedprice" \
-            "realized_price_sth" \
-            "data/onchain-realized-price-sth.json"
+          # ========================================================
+          # COINBASE BTC/USD
+          #
+          # Coinbase "side" = MAKER side.
+          #
+          # maker SELL -> aggressor/taker BUY
+          # maker BUY  -> aggressor/taker SELL
+          #
+          # Daraus:
+          # - aggressive buy volume
+          # - aggressive sell volume
+          # - Spot CVD
+          # - Taker Buy %
+          # - Buy/Sell Ratio
+          # ========================================================
+          try:
+              cutoff_15m = NOW - timedelta(minutes=15)
+              cutoff_1h = NOW - timedelta(hours=1)
 
-          # 2. Kostenbasis langfristiger Anleger
-          fetch_metric \
-            "realizedprice" \
-            "realized_price_lth" \
-            "data/onchain-realized-price-lth.json"
+              url = (
+                  "https://api.exchange.coinbase.com/"
+                  "products/BTC-USD/trades?limit=1000"
+              )
 
-          # 3. STH-Bewertung / Überhitzung / Kapitulation
-          fetch_metric \
-            "market_value_to_realized_value" \
-            "mvrv_z_52k_window_sth" \
-            "data/onchain-mvrv-z-sth.json"
+              trades = {}
+              pages = 0
+              oldest = NOW
 
-          # 4. Gewinn-/Verlustrealisierung kurzfristiger Anleger
-          fetch_metric \
-            "spent_output_profit_ratio" \
-            "sopr_sth" \
-            "data/onchain-sopr-sth.json"
+              coverage_15m = False
+              coverage_1h = False
 
-          # 5. Tatsächlich realisierter Gewinn/Verlust der STH
-          fetch_metric \
-            "net_realized_profit_loss" \
-            "net_realized_profit_loss_sth" \
-            "data/onchain-nrpl-sth.json"
+              while pages < 80:
+                  batch, headers = get_json(url)
 
-          # 6. Kapitalzufluss / Kapitalabfluss
-          fetch_metric \
-            "realizedcap" \
-            "realized_cap" \
-            "data/onchain-realized-cap.json"
+                  pages += 1
 
-          # 7. Bewegung älterer Coins / Distribution
-          fetch_metric \
-            "cointime_statistics" \
-            "liveliness" \
-            "data/onchain-liveliness.json"
+                  if not batch:
+                      break
 
-          # 8. Ökonomische Kostenbasis aktiver Marktteilnehmer
-          fetch_metric \
-            "cointime_statistics" \
-            "true_market_meanprice" \
-            "data/onchain-true-market-mean.json"
+                  for trade in batch:
+                      trades[str(trade["trade_id"])] = trade
 
-          # 9. Übergeordnete Marktzyklus-Bewertung
-          fetch_metric \
-            "market_value_to_realized_value" \
-            "mvrv_z" \
-            "data/onchain-mvrv-z.json"
+                  times = [
+                      datetime.fromisoformat(
+                          trade["time"].replace("Z", "+00:00")
+                      )
+                      for trade in batch
+                  ]
 
+                  batch_oldest = min(times)
+                  oldest = min(oldest, batch_oldest)
 
-          echo "Successful metrics: $SUCCESS"
-          echo "Failed metrics: $FAILED"
+                  if oldest <= cutoff_15m:
+                      coverage_15m = True
 
-          # Nur als frisch markieren, wenn alle neun Abfragen
-          # tatsächlich erfolgreich waren.
-          if [ "$SUCCESS" -eq 9 ]; then
-            date -u +"%Y-%m-%dT%H:%M:%SZ" \
-              > data/onchain-updated.txt
-            echo "On-chain dataset complete"
-          else
-            echo "On-chain dataset incomplete - freshness timestamp unchanged"
-          fi
+                  if oldest <= cutoff_1h:
+                      coverage_1h = True
+                      break
+
+                  cursor = (
+                      headers.get("CB-AFTER")
+                      or headers.get("Cb-After")
+                      or headers.get("cb-after")
+                  )
+
+                  if not cursor:
+                      break
+
+                  url = (
+                      "https://api.exchange.coinbase.com/"
+                      "products/BTC-USD/trades"
+                      "?limit=1000&after="
+                      + urllib.parse.quote(str(cursor))
+                  )
+
+                  time.sleep(0.15)
 
 
-      - name: Save data
-        if: always()
-        run: |
-          rm -f data/*.tmp
+              def aggregate_coinbase(cutoff):
+                  buy_usd = 0.0
+                  sell_usd = 0.0
+                  count = 0
 
-          git config user.name "btc-data-bot"
-          git config user.email "btc-data-bot@users.noreply.github.com"
+                  for trade in trades.values():
 
-          git add data/
+                      ts = datetime.fromisoformat(
+                          trade["time"].replace("Z", "+00:00")
+                      )
 
-          if git diff --cached --quiet; then
-            echo "No changes"
-            exit 0
-          fi
+                      if ts < cutoff or ts > NOW:
+                          continue
 
-          git commit -m "Update BTC and on-chain data"
+                      notional = (
+                          float(trade["price"])
+                          * float(trade["size"])
+                      )
 
-          git pull --rebase
-          git push
+                      # Coinbase reports MAKER side.
+                      # Invert to obtain aggressor side.
+                      if trade["side"] == "sell":
+                          buy_usd += notional
+
+                      elif trade["side"] == "buy":
+                          sell_usd += notional
+
+                      count += 1
+
+                  total = buy_usd + sell_usd
+
+                  return {
+                      "aggressive_buy_usd": buy_usd,
+                      "aggressive_sell_usd": sell_usd,
+
+                      "spot_cvd_usd":
+                          buy_usd - sell_usd,
+
+                      "taker_buy_share_pct":
+                          (
+                              100.0 * buy_usd / total
+                              if total else None
+                          ),
+
+                      "buy_sell_ratio":
+                          ratio(buy_usd, sell_usd),
+
+                      "trade_count":
+                          count,
+                  }
+
+
+              result["coinbase_btc_usd"] = {
+                  "status": "ok",
+
+                  "source":
+                      "Coinbase Exchange public trades",
+
+                  "side_definition":
+                      "API side is maker side; aggressor side inverted",
+
+                  "pages_fetched":
+                      pages,
+
+                  "oldest_trade_time":
+                      oldest.isoformat().replace(
+                          "+00:00", "Z"
+                      ),
+
+                  "coverage_15m_complete":
+                      coverage_15m,
+
+                  "coverage_1h_complete":
+                      coverage_1h,
+
+                  "m15":
+                      aggregate_coinbase(cutoff_15m),
+
+                  "h1":
+                      aggregate_coinbase(cutoff_1h),
+              }
+
+          except Exception as e:
+
+              result["coinbase_btc_usd"] = {
+                  "status": "error",
+                  "error": str(e)[:300],
+              }
+
+
+          # ========================================================
+          # BINANCE BTC/USDT SPOT
+          #
+          # Spot-Klines enthalten:
+          # quote volume
+          # taker-buy quote volume
+          #
+          # Daraus:
+          # - Taker Buy %
+          # - Taker Sell %
+          # - Buy/Sell Ratio
+          # - Delta
+          # ========================================================
+          try:
+
+              def binance_last_closed(interval):
+
+                  url = (
+                      "https://data-api.binance.vision/"
+                      "api/v3/klines"
+                      f"?symbol=BTCUSDT"
+                      f"&interval={interval}"
+                      f"&limit=3"
+                  )
+
+                  rows, _ = get_json(url)
+
+                  closed = [
+                      row for row in rows
+                      if int(row[6]) < NOW_MS
+                  ]
+
+                  if not closed:
+                      raise RuntimeError(
+                          f"No completed Binance {interval} kline"
+                      )
+
+                  row = closed[-1]
+
+                  total_quote = float(row[7])
+                  taker_buy = float(row[10])
+
+                  taker_sell = max(
+                      0.0,
+                      total_quote - taker_buy
+                  )
+
+                  return {
+                      "open_time_ms":
+                          int(row[0]),
+
+                      "close_time_ms":
+                          int(row[6]),
+
+                      "quote_volume_usdt":
+                          total_quote,
+
+                      "taker_buy_quote_usdt":
+                          taker_buy,
+
+                      "taker_sell_quote_usdt":
+                          taker_sell,
+
+                      "delta_quote_usdt":
+                          taker_buy - taker_sell,
+
+                      "taker_buy_share_pct":
+                          (
+                              100.0
+                              * taker_buy
+                              / total_quote
+                              if total_quote else None
+                          ),
+
+                      "taker_sell_share_pct":
+                          (
+                              100.0
+                              * taker_sell
+                              / total_quote
+                              if total_quote else None
+                          ),
+
+                      "buy_sell_ratio":
+                          ratio(
+                              taker_buy,
+                              taker_sell
+                          ),
+
+                      "trade_count":
+                          int(row[8]),
+                  }
+
+
+              result["binance_btc_usdt"] = {
+                  "status": "ok",
+
+                  "source":
+                      "Binance Spot public klines",
+
+                  "m15":
+                      binance_last_closed("15m"),
+
+                  "h1":
+                      binance_last_closed("1h"),
+
+                  "h4":
+                      binance_last_closed("4h"),
+              }
+
+          except Exception as e:
+
+              result["binance_btc_usdt"] = {
+                  "status": "error",
+                  "error": str(e)[:300],
+              }
+
+
+          # ========================================================
+          # KRAKEN BTC/USD ORDERBOOK
+          #
+          # Nur Zusatzsignal.
+          #
+          # Orderbuch = wartende Liquidität,
+          # NICHT ausgeführte Nachfrage.
+          # ========================================================
+          try:
+
+              url = (
+                  "https://api.kraken.com/"
+                  "0/public/PreTrade"
+                  "?symbol=BTC%2FUSD"
+              )
+
+              book, _ = get_json(url)
+
+              if book.get("error"):
+                  raise RuntimeError(
+                      str(book["error"])
+                  )
+
+              b = book["result"]
+
+              bids = b.get("bids", [])
+              asks = b.get("asks", [])
+
+              bid_notional = sum(
+                  float(level["price"])
+                  * float(level["qty"])
+                  for level in bids
+              )
+
+              ask_notional = sum(
+                  float(level["price"])
+                  * float(level["qty"])
+                  for level in asks
+              )
+
+              total = bid_notional + ask_notional
+
+              result[
+                  "kraken_btc_usd_orderbook"
+              ] = {
+                  "status": "ok",
+
+                  "source":
+                      "Kraken PreTrade public order book",
+
+                  "levels_bid":
+                      len(bids),
+
+                  "levels_ask":
+                      len(asks),
+
+                  "bid_notional_usd":
+                      bid_notional,
+
+                  "ask_notional_usd":
+                      ask_notional,
+
+                  "bid_share_pct":
+                      (
+                          100.0
+                          * bid_notional
+                          / total
+                          if total else None
+                      ),
+
+                  "ask_share_pct":
+                      (
+                          100.0
+                          * ask_notional
+                          / total
+                          if total else None
+                      ),
+
+                  "imbalance_pct":
+                      (
+                          100.0
+                          * (
+                              bid_notional
+                              - ask_notional
+                          )
+                          / total
+                          if total else None
+                      ),
+
+                  "note":
+                      (
+                          "Standing liquidity only; "
+                          "not proof of executed buying pressure"
+                      ),
+              }
+
+          except Exception as e:
+
+              result[
+                  "kraken_btc_usd_orderbook"
+              ] = {
+                  "status": "error",
+                  "error": str(e)[:300],
+              }
+
+
+          # ========================================================
+          # QUALITY STATUS
+          # ========================================================
+
+          coinbase_ok = (
+              result["coinbase_btc_usd"]
+              .get("status") == "ok"
+          )
+
+          binance_ok = (
+              result["binance_btc_usdt"]
+              .get("status") == "ok"
+          )
+
+          result["quality"] = {
+              "executed_flow_available":
+                  coinbase_ok or binance_ok,
+
+              "coinbase_1h_complete":
+                  result["coinbase_btc_usd"]
+                  .get(
+                      "coverage_1h_complete",
+                      False
+                  ),
+
+              "primary_signal":
+                  (
+                      "coinbase_btc_usd"
+                      if coinbase
