@@ -1,6 +1,6 @@
 {
   "definition": "Binance top traders are the top 20 percent of users by margin balance.",
-  "fetched_at": "2026-09-25T05:11:18.552023Z",
+  "fetched_at": "2026-09-25T05:19:06.328104Z",
   "periods": {
     "15m": {
       "error": "HTTP Error 451: ",
