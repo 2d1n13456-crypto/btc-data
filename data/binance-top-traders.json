@@ -1,0 +1,21 @@
+{
+  "definition": "Binance top traders are the top 20 percent of users by margin balance.",
+  "fetched_at": "2026-09-25T05:11:18.552023Z",
+  "periods": {
+    "15m": {
+      "error": "HTTP Error 451: ",
+      "status": "error"
+    },
+    "1h": {
+      "error": "HTTP Error 451: ",
+      "status": "error"
+    },
+    "4h": {
+      "error": "HTTP Error 451: ",
+      "status": "error"
+    }
+  },
+  "source": "Binance USD-M Futures public top trader ratios",
+  "symbol": "BTCUSDT",
+  "usage": "Position ratio is primary. Account ratio is only a cross-check. Use inside the existing derivatives group and never as an extra weight."
+}
