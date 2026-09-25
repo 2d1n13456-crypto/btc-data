@@ -483,45 +483,32 @@ jobs:
 
 
       # ------------------------------------------------------------
-      # BINANCE TOP TRADERS
-      # BTCUSDT USD-M Futures
-      #
-      # Position Ratio = primaer
-      # Account Ratio = Crosscheck
-      #
-      # Wird innerhalb der bestehenden Derivate-Gruppe verwendet.
-      # KEIN zusaetzliches Gewicht.
+      # BINANCE TOP TRADERS / SMART MONEY
+      # Public mirror collected every 15 minutes
+      # Position ratio stays inside existing derivatives group.
       # ------------------------------------------------------------
       - name: Build Binance top trader positioning
         continue-on-error: true
         run: |
           python3 - <<'PY'
           import json
-          import urllib.parse
           import urllib.request
           from datetime import datetime, timezone
 
           NOW = datetime.now(timezone.utc)
 
           BASE = (
-              "https://fapi.binance.com/"
-              "futures/data"
+              "https://smart-money-collector."
+              "andychien-design.workers.dev"
           )
 
-          def get_json(path, params):
 
-              url = (
-                  BASE
-                  + "/"
-                  + path
-                  + "?"
-                  + urllib.parse.urlencode(params)
-              )
+          def fetch_text(url, timeout=30):
 
               req = urllib.request.Request(
                   url,
                   headers={
-                      "Accept": "application/json",
+                      "Accept": "*/*",
                       "User-Agent":
                           "btc-data-github-action/1.0",
                   },
@@ -529,103 +516,68 @@ jobs:
 
               with urllib.request.urlopen(
                   req,
-                  timeout=30,
+                  timeout=timeout,
               ) as resp:
 
-                  return json.loads(
-                      resp.read().decode("utf-8")
+                  return resp.read().decode(
+                      "utf-8"
                   )
 
 
-          def normalize(rows):
+          def fetch_json(url, timeout=30):
 
-              output = []
-
-              for row in rows:
-
-                  output.append({
-                      "timestamp_ms":
-                          int(row["timestamp"]),
-
-                      "long_short_ratio":
-                          float(
-                              row["longShortRatio"]
-                          ),
-
-                      "long_share":
-                          float(
-                              row["longAccount"]
-                          ),
-
-                      "short_share":
-                          float(
-                              row["shortAccount"]
-                          ),
-                  })
-
-              return output
-
-
-          def classify(series):
-
-              if not series:
-
-                  return {
-                      "status":
-                          "unavailable",
-
-                      "bias":
-                          "unknown",
-
-                      "movement":
-                          "unknown",
-
-                      "interpretation":
-                          "Top-trader data unavailable",
-                  }
-
-
-              latest = series[-1]
-
-              lookback = (
-                  series[-5:]
-                  if len(series) >= 5
-                  else series
+              return json.loads(
+                  fetch_text(
+                      url,
+                      timeout=timeout
+                  )
               )
 
-              first = (
-                  lookback[0]
-                  ["long_short_ratio"]
+
+          def parse_rows(text):
+
+              rows = []
+
+              for line in text.splitlines():
+
+                  line = line.strip()
+
+                  if not line:
+                      continue
+
+                  try:
+                      row = json.loads(line)
+
+                  except Exception:
+                      continue
+
+                  if (
+                      row.get(
+                          "top_pos_ls_ratio"
+                      )
+                      is not None
+                  ):
+                      rows.append(row)
+
+              return rows
+
+
+          def signal(latest, earlier):
+
+              last = float(
+                  latest[
+                      "top_pos_ls_ratio"
+                  ]
               )
 
-              last = (
-                  latest
-                  ["long_short_ratio"]
+              first = float(
+                  earlier[
+                      "top_pos_ls_ratio"
+                  ]
               )
 
               delta = last - first
 
-
-              # --------------------------------------
-              # Bewegung
-              # --------------------------------------
-
-              if abs(delta) < 0.03:
-
-                  movement = "stable"
-
-              elif delta > 0:
-
-                  movement = "more_long"
-
-              else:
-
-                  movement = "more_short"
-
-
-              # --------------------------------------
-              # Aktueller Bias
-              # --------------------------------------
 
               if last >= 1.10:
 
@@ -640,92 +592,96 @@ jobs:
                   bias = "neutral"
 
 
-              # --------------------------------------
-              # Menschliche Interpretation
-              # --------------------------------------
+              if abs(delta) < 0.03:
 
-              if (
-                  movement == "more_long"
-                  and bias == "long"
-              ):
+                  movement = "stable"
 
-                  text = (
-                      "Top traders are building longs"
-                  )
+              elif delta > 0:
 
-              elif (
-                  movement == "more_long"
-                  and bias == "neutral"
-              ):
-
-                  text = (
-                      "Top traders are reducing shorts "
-                      "and turning more neutral"
-                  )
-
-              elif (
-                  movement == "more_long"
-                  and bias == "short"
-              ):
-
-                  text = (
-                      "Top traders remain short-biased "
-                      "but are reducing shorts"
-                  )
-
-              elif (
-                  movement == "more_short"
-                  and bias == "short"
-              ):
-
-                  text = (
-                      "Top traders are building shorts"
-                  )
-
-              elif (
-                  movement == "more_short"
-                  and bias == "neutral"
-              ):
-
-                  text = (
-                      "Top traders are reducing longs "
-                      "and turning more neutral"
-                  )
-
-              elif (
-                  movement == "more_short"
-                  and bias == "long"
-              ):
-
-                  text = (
-                      "Top traders remain long-biased "
-                      "but are reducing longs"
-                  )
-
-              elif bias == "long":
-
-                  text = (
-                      "Top traders remain long-biased "
-                      "and are largely waiting"
-                  )
-
-              elif bias == "short":
-
-                  text = (
-                      "Top traders remain short-biased "
-                      "and are largely waiting"
-                  )
+                  movement = "more_long"
 
               else:
 
-                  text = (
-                      "Top traders are broadly neutral "
-                      "and waiting"
-                  )
+                  movement = "more_short"
+
+
+              if movement == "more_long":
+
+                  if bias == "long":
+
+                      text = (
+                          "Top-Trader werden "
+                          "deutlich long-lastiger"
+                      )
+
+                  elif bias == "short":
+
+                      text = (
+                          "Top-Trader bleiben "
+                          "short-lastig, werden aber "
+                          "weniger bearish"
+                      )
+
+                  else:
+
+                      text = (
+                          "Top-Trader verschieben "
+                          "sich in Richtung Long"
+                      )
+
+
+              elif movement == "more_short":
+
+                  if bias == "short":
+
+                      text = (
+                          "Top-Trader werden "
+                          "deutlich short-lastiger"
+                      )
+
+                  elif bias == "long":
+
+                      text = (
+                          "Top-Trader bleiben "
+                          "long-lastig, bauen den "
+                          "Long-Bias aber ab"
+                      )
+
+                  else:
+
+                      text = (
+                          "Top-Trader verschieben "
+                          "sich in Richtung Short"
+                      )
+
+
+              else:
+
+                  if bias == "long":
+
+                      text = (
+                          "Top-Trader bleiben "
+                          "long-lastig und "
+                          "weitgehend stabil"
+                      )
+
+                  elif bias == "short":
+
+                      text = (
+                          "Top-Trader bleiben "
+                          "short-lastig und "
+                          "weitgehend stabil"
+                      )
+
+                  else:
+
+                      text = (
+                          "Top-Trader sind "
+                          "weitgehend neutral"
+                      )
 
 
               return {
-                  "status": "ok",
                   "bias": bias,
                   "movement": movement,
                   "interpretation": text,
@@ -733,6 +689,7 @@ jobs:
 
 
           result = {
+
               "fetched_at":
                   NOW.isoformat().replace(
                       "+00:00",
@@ -741,117 +698,187 @@ jobs:
 
               "source":
                   (
-                      "Binance USD-M Futures "
-                      "public top trader ratios"
+                      "Binance Smart Money "
+                      "public mirror"
                   ),
+
+              "mirror":
+                  BASE,
 
               "symbol":
                   "BTCUSDT",
 
-              "definition":
-                  (
-                      "Binance top traders are the "
-                      "top 20 percent of users by "
-                      "margin balance."
-                  ),
-
-              "usage":
-                  (
-                      "Position ratio is primary. "
-                      "Account ratio is only a cross-check. "
-                      "Use inside the existing derivatives "
-                      "group and never as an extra weight."
-                  ),
-
-              "periods": {},
+              "status":
+                  "error",
           }
 
 
-          success = False
+          try:
+
+              latest = fetch_json(
+                  BASE
+                  + "/data/btc/prev_row.json"
+              )
 
 
-          for period in (
-              "15m",
-              "1h",
-              "4h",
-          ):
+              index = fetch_json(
+                  BASE
+                  + "/data/btc/days/index.json"
+              )
 
-              try:
 
-                  position_rows = get_json(
-                      "topLongShortPositionRatio",
-                      {
-                          "symbol":
-                              "BTCUSDT",
+              if not index:
 
-                          "period":
-                              period,
-
-                          "limit":
-                              30,
-                      },
+                  raise RuntimeError(
+                      "No history dates available"
                   )
 
 
-                  account_rows = get_json(
-                      "topLongShortAccountRatio",
-                      {
-                          "symbol":
-                              "BTCUSDT",
+              rows = []
 
-                          "period":
-                              period,
 
-                          "limit":
-                              30,
-                      },
+              for day in index[-2:]:
+
+                  url = (
+                      BASE
+                      + "/data/btc/days/"
+                      + day
+                      + ".ndjson"
+                  )
+
+                  try:
+
+                      rows.extend(
+                          parse_rows(
+                              fetch_text(url)
+                          )
+                      )
+
+                  except Exception:
+
+                      pass
+
+
+              rows.sort(
+                  key=lambda r:
+                  str(
+                      r.get(
+                          "timestamp",
+                          ""
+                      )
+                  )
+              )
+
+
+              if not rows:
+
+                  rows = [latest]
+
+
+              latest_ratio = (
+                  latest.get(
+                      "top_pos_ls_ratio"
+                  )
+              )
+
+
+              if latest_ratio is None:
+
+                  raise RuntimeError(
+                      (
+                          "Latest row has no "
+                          "top_pos_ls_ratio"
+                      )
                   )
 
 
-                  position_data = normalize(
-                      position_rows
-                  )
-
-                  account_data = normalize(
-                      account_rows
-                  )
+              ref_1h = (
+                  rows[-5]
+                  if len(rows) >= 5
+                  else rows[0]
+              )
 
 
-                  result["periods"][period] = {
-                      "status": "ok",
+              ref_4h = (
+                  rows[-17]
+                  if len(rows) >= 17
+                  else rows[0]
+              )
 
-                      "position_ratio":
-                          position_data,
 
-                      "account_ratio":
-                          account_data,
+              result.update({
 
-                      "position_signal":
-                          classify(
-                              position_data
+                  "status":
+                      "ok",
+
+                  "latest": {
+
+                      "timestamp":
+                          latest.get(
+                              "timestamp"
                           ),
 
-                      "account_crosscheck":
-                          classify(
-                              account_data
+                      "top_pos_ls_ratio":
+                          latest_ratio,
+
+                      "smart_money_ls_ratio":
+                          latest.get(
+                              "sm_ls_ratio"
                           ),
-                  }
+
+                      "smart_money_long_traders":
+                          latest.get(
+                              "sm_long_traders"
+                          ),
+
+                      "smart_money_short_traders":
+                          latest.get(
+                              "sm_short_traders"
+                          ),
+
+                      "smart_money_long_whales":
+                          latest.get(
+                              "sm_long_whales"
+                          ),
+
+                      "smart_money_short_whales":
+                          latest.get(
+                              "sm_short_whales"
+                          ),
+                  },
+
+                  "signal_1h":
+                      signal(
+                          latest,
+                          ref_1h
+                      ),
+
+                  "signal_4h":
+                      signal(
+                          latest,
+                          ref_4h
+                      ),
+
+                  "history_points":
+                      len(rows),
+
+                  "usage":
+                      (
+                          "Use signal_1h as primary "
+                          "current top-trader signal, "
+                          "signal_4h as context. "
+                          "Keep inside the existing "
+                          "derivatives weight; do not "
+                          "add separate weight."
+                      ),
+              })
 
 
-                  success = True
+          except Exception as e:
 
-
-              except Exception as e:
-
-                  result[
-                      "periods"
-                  ][period] = {
-                      "status":
-                          "error",
-
-                      "error":
-                          str(e)[:300],
-                  }
+              result["error"] = (
+                  str(e)[:500]
+              )
 
 
           with open(
@@ -868,7 +895,7 @@ jobs:
               )
 
 
-          if success:
+          if result.get("status") == "ok":
 
               with open(
                   (
@@ -880,7 +907,9 @@ jobs:
               ) as fh:
 
                   fh.write(
-                      result["fetched_at"]
+                      result[
+                          "fetched_at"
+                      ]
                       + "\n"
                   )
 
