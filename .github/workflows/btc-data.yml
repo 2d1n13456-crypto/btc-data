@@ -220,4 +220,866 @@ jobs:
                   "coverage_15m_complete":
                       coverage_15m,
                   "coverage_1h_complete":
-                      coverage_1
+                      coverage_1h,
+                  "m15":
+                      aggregate_coinbase(cutoff_15m),
+                  "h1":
+                      aggregate_coinbase(cutoff_1h),
+              }
+
+          except Exception as e:
+
+              result["coinbase_btc_usd"] = {
+                  "status": "error",
+                  "error": str(e)[:300],
+              }
+
+
+          # ========================================================
+          # BINANCE BTC/USDT SPOT
+          # ========================================================
+          try:
+
+              def binance_last_closed(interval):
+
+                  url = (
+                      "https://data-api.binance.vision/"
+                      "api/v3/klines"
+                      f"?symbol=BTCUSDT"
+                      f"&interval={interval}"
+                      f"&limit=3"
+                  )
+
+                  rows, _ = get_json(url)
+
+                  closed = [
+                      row for row in rows
+                      if int(row[6]) < NOW_MS
+                  ]
+
+                  if not closed:
+                      raise RuntimeError(
+                          f"No completed Binance {interval} kline"
+                      )
+
+                  row = closed[-1]
+
+                  total_quote = float(row[7])
+                  taker_buy = float(row[10])
+
+                  taker_sell = max(
+                      0.0,
+                      total_quote - taker_buy
+                  )
+
+                  return {
+                      "open_time_ms": int(row[0]),
+                      "close_time_ms": int(row[6]),
+                      "quote_volume_usdt": total_quote,
+                      "taker_buy_quote_usdt": taker_buy,
+                      "taker_sell_quote_usdt": taker_sell,
+                      "delta_quote_usdt":
+                          taker_buy - taker_sell,
+                      "taker_buy_share_pct": (
+                          100.0
+                          * taker_buy
+                          / total_quote
+                          if total_quote else None
+                      ),
+                      "taker_sell_share_pct": (
+                          100.0
+                          * taker_sell
+                          / total_quote
+                          if total_quote else None
+                      ),
+                      "buy_sell_ratio": ratio(
+                          taker_buy,
+                          taker_sell
+                      ),
+                      "trade_count": int(row[8]),
+                  }
+
+
+              result["binance_btc_usdt"] = {
+                  "status": "ok",
+                  "source":
+                      "Binance Spot public klines",
+                  "m15":
+                      binance_last_closed("15m"),
+                  "h1":
+                      binance_last_closed("1h"),
+                  "h4":
+                      binance_last_closed("4h"),
+              }
+
+          except Exception as e:
+
+              result["binance_btc_usdt"] = {
+                  "status": "error",
+                  "error": str(e)[:300],
+              }
+
+
+          # ========================================================
+          # KRAKEN BTC/USD ORDERBOOK
+          # Zusatzsignal, NICHT fuer Trendwahrscheinlichkeit
+          # ========================================================
+          try:
+
+              url = (
+                  "https://api.kraken.com/"
+                  "0/public/PreTrade"
+                  "?symbol=BTC%2FUSD"
+              )
+
+              book, _ = get_json(url)
+
+              if book.get("error"):
+                  raise RuntimeError(
+                      str(book["error"])
+                  )
+
+              b = book["result"]
+
+              bids = b.get("bids", [])
+              asks = b.get("asks", [])
+
+              bid_notional = sum(
+                  float(level["price"])
+                  * float(level["qty"])
+                  for level in bids
+              )
+
+              ask_notional = sum(
+                  float(level["price"])
+                  * float(level["qty"])
+                  for level in asks
+              )
+
+              total = bid_notional + ask_notional
+
+              result[
+                  "kraken_btc_usd_orderbook"
+              ] = {
+                  "status": "ok",
+                  "source":
+                      "Kraken PreTrade public order book",
+                  "levels_bid": len(bids),
+                  "levels_ask": len(asks),
+                  "bid_notional_usd":
+                      bid_notional,
+                  "ask_notional_usd":
+                      ask_notional,
+                  "bid_share_pct": (
+                      100.0
+                      * bid_notional
+                      / total
+                      if total else None
+                  ),
+                  "ask_share_pct": (
+                      100.0
+                      * ask_notional
+                      / total
+                      if total else None
+                  ),
+                  "imbalance_pct": (
+                      100.0
+                      * (
+                          bid_notional
+                          - ask_notional
+                      )
+                      / total
+                      if total else None
+                  ),
+                  "note":
+                      (
+                          "Standing liquidity only; "
+                          "not proof of executed buying pressure"
+                      ),
+              }
+
+          except Exception as e:
+
+              result[
+                  "kraken_btc_usd_orderbook"
+              ] = {
+                  "status": "error",
+                  "error": str(e)[:300],
+              }
+
+
+          coinbase_ok = (
+              result["coinbase_btc_usd"]
+              .get("status") == "ok"
+          )
+
+          binance_ok = (
+              result["binance_btc_usdt"]
+              .get("status") == "ok"
+          )
+
+          result["quality"] = {
+              "executed_flow_available":
+                  coinbase_ok or binance_ok,
+
+              "coinbase_1h_complete":
+                  result["coinbase_btc_usd"]
+                  .get(
+                      "coverage_1h_complete",
+                      False
+                  ),
+
+              "primary_signal": (
+                  "coinbase_btc_usd"
+                  if coinbase_ok
+                  and result[
+                      "coinbase_btc_usd"
+                  ].get(
+                      "coverage_1h_complete",
+                      False
+                  )
+                  else
+                  "binance_btc_usdt"
+                  if binance_ok
+                  else
+                  "unavailable"
+              ),
+          }
+
+          with open(
+              "data/spot-demand.json",
+              "w",
+              encoding="utf-8",
+          ) as fh:
+
+              json.dump(
+                  result,
+                  fh,
+                  indent=2,
+                  sort_keys=True,
+              )
+
+          if coinbase_ok or binance_ok:
+
+              with open(
+                  "data/spot-demand-updated.txt",
+                  "w",
+                  encoding="utf-8",
+              ) as fh:
+
+                  fh.write(
+                      result["fetched_at"]
+                      + "\n"
+                  )
+
+          print(
+              json.dumps(
+                  result,
+                  indent=2
+              )
+          )
+
+          PY
+
+
+      # ------------------------------------------------------------
+      # BINANCE TOP TRADERS
+      # BTCUSDT USD-M Futures
+      #
+      # Position Ratio = primaer
+      # Account Ratio = Crosscheck
+      #
+      # Wird innerhalb der bestehenden Derivate-Gruppe verwendet.
+      # KEIN zusaetzliches Gewicht.
+      # ------------------------------------------------------------
+      - name: Build Binance top trader positioning
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          import json
+          import urllib.parse
+          import urllib.request
+          from datetime import datetime, timezone
+
+          NOW = datetime.now(timezone.utc)
+
+          BASE = (
+              "https://fapi.binance.com/"
+              "futures/data"
+          )
+
+          def get_json(path, params):
+
+              url = (
+                  BASE
+                  + "/"
+                  + path
+                  + "?"
+                  + urllib.parse.urlencode(params)
+              )
+
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "Accept": "application/json",
+                      "User-Agent":
+                          "btc-data-github-action/1.0",
+                  },
+              )
+
+              with urllib.request.urlopen(
+                  req,
+                  timeout=30,
+              ) as resp:
+
+                  return json.loads(
+                      resp.read().decode("utf-8")
+                  )
+
+
+          def normalize(rows):
+
+              output = []
+
+              for row in rows:
+
+                  output.append({
+                      "timestamp_ms":
+                          int(row["timestamp"]),
+
+                      "long_short_ratio":
+                          float(
+                              row["longShortRatio"]
+                          ),
+
+                      "long_share":
+                          float(
+                              row["longAccount"]
+                          ),
+
+                      "short_share":
+                          float(
+                              row["shortAccount"]
+                          ),
+                  })
+
+              return output
+
+
+          def classify(series):
+
+              if not series:
+
+                  return {
+                      "status":
+                          "unavailable",
+
+                      "bias":
+                          "unknown",
+
+                      "movement":
+                          "unknown",
+
+                      "interpretation":
+                          "Top-trader data unavailable",
+                  }
+
+
+              latest = series[-1]
+
+              lookback = (
+                  series[-5:]
+                  if len(series) >= 5
+                  else series
+              )
+
+              first = (
+                  lookback[0]
+                  ["long_short_ratio"]
+              )
+
+              last = (
+                  latest
+                  ["long_short_ratio"]
+              )
+
+              delta = last - first
+
+
+              # --------------------------------------
+              # Bewegung
+              # --------------------------------------
+
+              if abs(delta) < 0.03:
+
+                  movement = "stable"
+
+              elif delta > 0:
+
+                  movement = "more_long"
+
+              else:
+
+                  movement = "more_short"
+
+
+              # --------------------------------------
+              # Aktueller Bias
+              # --------------------------------------
+
+              if last >= 1.10:
+
+                  bias = "long"
+
+              elif last <= 0.90:
+
+                  bias = "short"
+
+              else:
+
+                  bias = "neutral"
+
+
+              # --------------------------------------
+              # Menschliche Interpretation
+              # --------------------------------------
+
+              if (
+                  movement == "more_long"
+                  and bias == "long"
+              ):
+
+                  text = (
+                      "Top traders are building longs"
+                  )
+
+              elif (
+                  movement == "more_long"
+                  and bias == "neutral"
+              ):
+
+                  text = (
+                      "Top traders are reducing shorts "
+                      "and turning more neutral"
+                  )
+
+              elif (
+                  movement == "more_long"
+                  and bias == "short"
+              ):
+
+                  text = (
+                      "Top traders remain short-biased "
+                      "but are reducing shorts"
+                  )
+
+              elif (
+                  movement == "more_short"
+                  and bias == "short"
+              ):
+
+                  text = (
+                      "Top traders are building shorts"
+                  )
+
+              elif (
+                  movement == "more_short"
+                  and bias == "neutral"
+              ):
+
+                  text = (
+                      "Top traders are reducing longs "
+                      "and turning more neutral"
+                  )
+
+              elif (
+                  movement == "more_short"
+                  and bias == "long"
+              ):
+
+                  text = (
+                      "Top traders remain long-biased "
+                      "but are reducing longs"
+                  )
+
+              elif bias == "long":
+
+                  text = (
+                      "Top traders remain long-biased "
+                      "and are largely waiting"
+                  )
+
+              elif bias == "short":
+
+                  text = (
+                      "Top traders remain short-biased "
+                      "and are largely waiting"
+                  )
+
+              else:
+
+                  text = (
+                      "Top traders are broadly neutral "
+                      "and waiting"
+                  )
+
+
+              return {
+                  "status": "ok",
+                  "bias": bias,
+                  "movement": movement,
+                  "interpretation": text,
+              }
+
+
+          result = {
+              "fetched_at":
+                  NOW.isoformat().replace(
+                      "+00:00",
+                      "Z"
+                  ),
+
+              "source":
+                  (
+                      "Binance USD-M Futures "
+                      "public top trader ratios"
+                  ),
+
+              "symbol":
+                  "BTCUSDT",
+
+              "definition":
+                  (
+                      "Binance top traders are the "
+                      "top 20 percent of users by "
+                      "margin balance."
+                  ),
+
+              "usage":
+                  (
+                      "Position ratio is primary. "
+                      "Account ratio is only a cross-check. "
+                      "Use inside the existing derivatives "
+                      "group and never as an extra weight."
+                  ),
+
+              "periods": {},
+          }
+
+
+          success = False
+
+
+          for period in (
+              "15m",
+              "1h",
+              "4h",
+          ):
+
+              try:
+
+                  position_rows = get_json(
+                      "topLongShortPositionRatio",
+                      {
+                          "symbol":
+                              "BTCUSDT",
+
+                          "period":
+                              period,
+
+                          "limit":
+                              30,
+                      },
+                  )
+
+
+                  account_rows = get_json(
+                      "topLongShortAccountRatio",
+                      {
+                          "symbol":
+                              "BTCUSDT",
+
+                          "period":
+                              period,
+
+                          "limit":
+                              30,
+                      },
+                  )
+
+
+                  position_data = normalize(
+                      position_rows
+                  )
+
+                  account_data = normalize(
+                      account_rows
+                  )
+
+
+                  result["periods"][period] = {
+                      "status": "ok",
+
+                      "position_ratio":
+                          position_data,
+
+                      "account_ratio":
+                          account_data,
+
+                      "position_signal":
+                          classify(
+                              position_data
+                          ),
+
+                      "account_crosscheck":
+                          classify(
+                              account_data
+                          ),
+                  }
+
+
+                  success = True
+
+
+              except Exception as e:
+
+                  result[
+                      "periods"
+                  ][period] = {
+                      "status":
+                          "error",
+
+                      "error":
+                          str(e)[:300],
+                  }
+
+
+          with open(
+              "data/binance-top-traders.json",
+              "w",
+              encoding="utf-8",
+          ) as fh:
+
+              json.dump(
+                  result,
+                  fh,
+                  indent=2,
+                  sort_keys=True,
+              )
+
+
+          if success:
+
+              with open(
+                  (
+                      "data/"
+                      "binance-top-traders-updated.txt"
+                  ),
+                  "w",
+                  encoding="utf-8",
+              ) as fh:
+
+                  fh.write(
+                      result["fetched_at"]
+                      + "\n"
+                  )
+
+
+          print(
+              json.dumps(
+                  result,
+                  indent=2
+              )
+          )
+
+          PY
+
+
+      # ------------------------------------------------------------
+      # BITCOIN LAB ON-CHAIN
+      # ------------------------------------------------------------
+      - name: Download Bitcoin Lab on-chain data
+        continue-on-error: true
+        env:
+          BITLAB_API_TOKEN: ${{ secrets.BITCOINLAB_API_TOKEN }}
+
+        run: |
+          set -u
+
+          HOUR=$(date -u +%H)
+
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] &&
+             [ $((10#$HOUR % 4)) -ne 0 ]; then
+
+            echo "No on-chain refresh this hour"
+            exit 0
+
+          fi
+
+          if [ -z "${BITLAB_API_TOKEN:-}" ]; then
+
+            echo "ERROR: BITCOINLAB_API_TOKEN missing"
+            exit 1
+
+          fi
+
+          mkdir -p data
+
+          BASE="https://api.researchbitcoin.net"
+
+          FROM_TIME=$(
+            date -u -d "8 days ago" \
+            +"%Y-%m-%dT%H:%M:%SZ"
+          )
+
+          TO_TIME=$(
+            date -u \
+            +"%Y-%m-%dT%H:%M:%SZ"
+          )
+
+          SUCCESS=0
+          FAILED=0
+
+
+          fetch_metric () {
+
+            GROUP="$1"
+            FIELD="$2"
+            FILE="$3"
+            TMP="${FILE}.tmp"
+
+            rm -f "$TMP"
+
+            echo "Fetching $GROUP/$FIELD ..."
+
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --max-time 40 \
+              --retry 1 \
+              --retry-delay 5 \
+              -H "X-API-Token: $BITLAB_API_TOKEN" \
+              -H "Accept: application/json" \
+              --get "$BASE/v2/$GROUP/$FIELD" \
+              --data-urlencode "from_time=$FROM_TIME" \
+              --data-urlencode "to_time=$TO_TIME" \
+              --data-urlencode "resolution=h4" \
+              --data-urlencode "output_format=json" \
+              -o "$TMP" &&
+              jq -e . "$TMP" >/dev/null
+
+            then
+
+              mv "$TMP" "$FILE"
+
+              SUCCESS=$((SUCCESS + 1))
+
+              echo "OK: $FIELD"
+
+            else
+
+              rm -f "$TMP"
+
+              FAILED=$((FAILED + 1))
+
+              echo "FAILED: $FIELD"
+
+            fi
+          }
+
+
+          fetch_metric \
+            "realizedprice" \
+            "realized_price_sth" \
+            "data/onchain-realized-price-sth.json"
+
+          fetch_metric \
+            "realizedprice" \
+            "realized_price_lth" \
+            "data/onchain-realized-price-lth.json"
+
+          fetch_metric \
+            "market_value_to_realized_value" \
+            "mvrv_z_52k_window_sth" \
+            "data/onchain-mvrv-z-sth.json"
+
+          fetch_metric \
+            "spent_output_profit_ratio" \
+            "sopr_sth" \
+            "data/onchain-sopr-sth.json"
+
+          fetch_metric \
+            "net_realized_profit_loss" \
+            "net_realized_profit_loss_sth" \
+            "data/onchain-nrpl-sth.json"
+
+          fetch_metric \
+            "realizedcap" \
+            "realized_cap" \
+            "data/onchain-realized-cap.json"
+
+          fetch_metric \
+            "cointime_statistics" \
+            "liveliness" \
+            "data/onchain-liveliness.json"
+
+          fetch_metric \
+            "cointime_statistics" \
+            "true_market_meanprice" \
+            "data/onchain-true-market-mean.json"
+
+          fetch_metric \
+            "market_value_to_realized_value" \
+            "mvrv_z" \
+            "data/onchain-mvrv-z.json"
+
+
+          echo "Successful metrics: $SUCCESS"
+          echo "Failed metrics: $FAILED"
+
+
+          if [ "$SUCCESS" -eq 9 ]; then
+
+            date -u \
+              +"%Y-%m-%dT%H:%M:%SZ" \
+              > data/onchain-updated.txt
+
+            echo "On-chain dataset complete"
+
+          else
+
+            echo \
+              "On-chain dataset incomplete - freshness timestamp unchanged"
+
+          fi
+
+
+      # ------------------------------------------------------------
+      # SAVE
+      # ------------------------------------------------------------
+      - name: Save data
+        if: always()
+        run: |
+          rm -f data/*.tmp
+
+          git config \
+            user.name \
+            "btc-data-bot"
+
+          git config \
+            user.email \
+            "btc-data-bot@users.noreply.github.com"
+
+          git add data/
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+
+          git commit \
+            -m "Update BTC, spot demand, top traders and on-chain data"
+
+          git pull --rebase
+          git push
