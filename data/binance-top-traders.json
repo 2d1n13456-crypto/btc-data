@@ -1,20 +1,20 @@
 {
-  "fetched_at": "2026-09-30T17:21:56.592598Z",
-  "history_points": 101,
+  "fetched_at": "2026-09-30T18:23:41.584550Z",
+  "history_points": 105,
   "latest": {
-    "smart_money_long_traders": 2091,
-    "smart_money_long_whales": 577,
-    "smart_money_ls_ratio": 3.1686,
-    "smart_money_short_traders": 870,
-    "smart_money_short_whales": 248,
-    "timestamp": "2026-10-01 01:16",
-    "top_pos_ls_ratio": 2.1332
+    "smart_money_long_traders": 2056,
+    "smart_money_long_whales": 554,
+    "smart_money_ls_ratio": 3.2597,
+    "smart_money_short_traders": 894,
+    "smart_money_short_whales": 272,
+    "timestamp": "2026-10-01 02:16",
+    "top_pos_ls_ratio": 2.166
   },
   "mirror": "https://smart-money-collector.andychien-design.workers.dev",
   "signal_1h": {
     "bias": "long",
-    "interpretation": "Top-Trader bleiben long-lastig, bauen den Long-Bias aber ab",
-    "movement": "more_short"
+    "interpretation": "Top-Trader werden deutlich long-lastiger",
+    "movement": "more_long"
   },
   "signal_4h": {
     "bias": "long",
