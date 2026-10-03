@@ -1,14 +1,14 @@
 {
-  "fetched_at": "2026-10-03T03:25:45.326775Z",
-  "history_points": 142,
+  "fetched_at": "2026-10-03T04:21:50.120754Z",
+  "history_points": 146,
   "latest": {
-    "smart_money_long_traders": 2648,
-    "smart_money_long_whales": 616,
-    "smart_money_ls_ratio": 5.2651,
-    "smart_money_short_traders": 1010,
-    "smart_money_short_whales": 283,
-    "timestamp": "2026-10-03 11:15",
-    "top_pos_ls_ratio": 2.0315
+    "smart_money_long_traders": 2649,
+    "smart_money_long_whales": 617,
+    "smart_money_ls_ratio": 5.2706,
+    "smart_money_short_traders": 1007,
+    "smart_money_short_whales": 284,
+    "timestamp": "2026-10-03 12:15",
+    "top_pos_ls_ratio": 2.0265
   },
   "mirror": "https://smart-money-collector.andychien-design.workers.dev",
   "signal_1h": {
