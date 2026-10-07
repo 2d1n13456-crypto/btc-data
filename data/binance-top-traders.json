@@ -1,25 +1,25 @@
 {
-  "fetched_at": "2026-10-07T09:23:02.830665Z",
-  "history_points": 166,
+  "fetched_at": "2026-10-07T10:22:51.206740Z",
+  "history_points": 170,
   "latest": {
-    "smart_money_long_traders": 2369,
-    "smart_money_long_whales": 555,
-    "smart_money_ls_ratio": 3.1993,
-    "smart_money_short_traders": 764,
-    "smart_money_short_whales": 206,
-    "timestamp": "2026-10-07 17:15",
-    "top_pos_ls_ratio": 1.6621
+    "smart_money_long_traders": 2363,
+    "smart_money_long_whales": 557,
+    "smart_money_ls_ratio": 2.7604,
+    "smart_money_short_traders": 756,
+    "smart_money_short_whales": 204,
+    "timestamp": "2026-10-07 18:15",
+    "top_pos_ls_ratio": 1.625
   },
   "mirror": "https://smart-money-collector.andychien-design.workers.dev",
   "signal_1h": {
     "bias": "long",
-    "interpretation": "Top-Trader bleiben long-lastig und weitgehend stabil",
-    "movement": "stable"
+    "interpretation": "Top-Trader bleiben long-lastig, bauen den Long-Bias aber ab",
+    "movement": "more_short"
   },
   "signal_4h": {
     "bias": "long",
-    "interpretation": "Top-Trader werden deutlich long-lastiger",
-    "movement": "more_long"
+    "interpretation": "Top-Trader bleiben long-lastig und weitgehend stabil",
+    "movement": "stable"
   },
   "source": "Binance Smart Money public mirror",
   "status": "ok",
