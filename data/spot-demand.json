@@ -1,16 +1,16 @@
 {
   "binance_btc_usdt": {
     "h1": {
-      "buy_sell_ratio": 0.744389672156435,
-      "close_time_ms": 1791421199999,
-      "delta_quote_usdt": -7205911.597739801,
-      "open_time_ms": 1791417600000,
-      "quote_volume_usdt": 49176095.0178134,
-      "taker_buy_quote_usdt": 20985091.7100368,
-      "taker_buy_share_pct": 42.673359286529816,
-      "taker_sell_quote_usdt": 28191003.3077766,
-      "taker_sell_share_pct": 57.326640713470184,
-      "trade_count": 70826
+      "buy_sell_ratio": 0.751144324632837,
+      "close_time_ms": 1791424799999,
+      "delta_quote_usdt": -6863314.188613102,
+      "open_time_ms": 1791421200000,
+      "quote_volume_usdt": 48295678.4964999,
+      "taker_buy_quote_usdt": 20716182.1539434,
+      "taker_buy_share_pct": 42.89448414198125,
+      "taker_sell_quote_usdt": 27579496.342556503,
+      "taker_sell_share_pct": 57.10551585801874,
+      "trade_count": 102251
     },
     "h4": {
       "buy_sell_ratio": 0.7038338398542565,
@@ -25,16 +25,16 @@
       "trade_count": 246948
     },
     "m15": {
-      "buy_sell_ratio": 0.8773746210627877,
-      "close_time_ms": 1791422099999,
-      "delta_quote_usdt": -984037.6419462003,
-      "open_time_ms": 1791421200000,
-      "quote_volume_usdt": 15065456.3612496,
-      "taker_buy_quote_usdt": 7040709.3596517,
-      "taker_buy_share_pct": 46.73412600869735,
-      "taker_sell_quote_usdt": 8024747.0015979,
-      "taker_sell_share_pct": 53.26587399130265,
-      "trade_count": 29042
+      "buy_sell_ratio": 0.5590704006054121,
+      "close_time_ms": 1791425699999,
+      "delta_quote_usdt": -5786255.770400599,
+      "open_time_ms": 1791424800000,
+      "quote_volume_usdt": 20459456.825648,
+      "taker_buy_quote_usdt": 7336600.5276237,
+      "taker_buy_share_pct": 35.85921459276734,
+      "taker_sell_quote_usdt": 13122856.298024299,
+      "taker_sell_share_pct": 64.14078540723267,
+      "trade_count": 43562
     },
     "source": "Binance Spot public klines",
     "status": "ok"
@@ -43,34 +43,34 @@
     "coverage_15m_complete": true,
     "coverage_1h_complete": true,
     "h1": {
-      "aggressive_buy_usd": 3122065.788001312,
-      "aggressive_sell_usd": 3563417.924849256,
-      "buy_sell_ratio": 0.8761435941122133,
-      "spot_cvd_usd": -441352.136847944,
-      "taker_buy_share_pct": 46.69917573802779,
-      "trade_count": 10826
+      "aggressive_buy_usd": 5177912.061835561,
+      "aggressive_sell_usd": 10047210.223656315,
+      "buy_sell_ratio": 0.5153581886486346,
+      "spot_cvd_usd": -4869298.161820754,
+      "taker_buy_share_pct": 34.00900146969347,
+      "trade_count": 13423
     },
     "m15": {
-      "aggressive_buy_usd": 803710.0243685765,
-      "aggressive_sell_usd": 1406153.945835768,
-      "buy_sell_ratio": 0.5715661693719316,
-      "spot_cvd_usd": -602443.9214671915,
-      "taker_buy_share_pct": 36.36920802388836,
-      "trade_count": 2967
+      "aggressive_buy_usd": 2153675.8683983292,
+      "aggressive_sell_usd": 4719206.115839546,
+      "buy_sell_ratio": 0.45636401876360744,
+      "spot_cvd_usd": -2565530.2474412164,
+      "taker_buy_share_pct": 31.335848241502255,
+      "trade_count": 4334
     },
-    "oldest_trade_time": "2026-10-08T00:20:40.038001Z",
-    "pages_fetched": 11,
+    "oldest_trade_time": "2026-10-08T01:17:32.759471Z",
+    "pages_fetched": 14,
     "side_definition": "API side is maker side; aggressor side inverted",
     "source": "Coinbase Exchange public trades",
     "status": "ok"
   },
-  "fetched_at": "2026-10-08T01:21:37.068797Z",
+  "fetched_at": "2026-10-08T02:20:46.231772Z",
   "kraken_btc_usd_orderbook": {
-    "ask_notional_usd": 1212321.722649752,
-    "ask_share_pct": 97.71913118666082,
-    "bid_notional_usd": 28296.882865685002,
-    "bid_share_pct": 2.2808688133391777,
-    "imbalance_pct": -95.43826237332163,
+    "ask_notional_usd": 1015951.65520426,
+    "ask_share_pct": 64.21786462136937,
+    "bid_notional_usd": 566087.332224463,
+    "bid_share_pct": 35.78213537863064,
+    "imbalance_pct": -28.43572924273873,
     "levels_ask": 10,
     "levels_bid": 10,
     "note": "Standing liquidity only; not proof of executed buying pressure",
